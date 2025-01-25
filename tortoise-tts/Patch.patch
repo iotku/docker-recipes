@@ -1,0 +1,25 @@
+diff --git a/Dockerfile b/Dockerfile
+index 6e5454d..1477357 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -30,5 +30,7 @@ RUN conda create --name tortoise python=3.9 numba inflect -y \
+     && conda activate tortoise \
+     && conda install --yes pytorch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia \
+     && conda install --yes transformers=4.31.0 \
++    && conda install spacy \
++    && python -m spacy download en_core_web_sm \
+     && cd /app \
+     && python setup.py install
+diff --git a/setup.py b/setup.py
+index 807670a..b4e6788 100644
+--- a/setup.py
++++ b/setup.py
+@@ -28,7 +28,7 @@ setuptools.setup(
+         'scipy',
+         'librosa',
+         'transformers==4.31.0',
+-        'tokenizers==0.14.0',
++        'tokenizers==0.11.1',
+         'scipy==1.13.1'
+         # 'deepspeed==0.8.3',
+     ],
