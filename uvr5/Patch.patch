@@ -1,0 +1,169 @@
+diff --git a/UVR.py b/UVR.py
+index 09f0de4..57ba4ce 100644
+--- a/UVR.py
++++ b/UVR.py
+@@ -42,13 +42,13 @@ from gui_data.old_data_check import file_check, remove_unneeded_yamls, remove_te
+ from gui_data.tkinterdnd2 import TkinterDnD, DND_FILES
+ from lib_v5.vr_network.model_param_init import ModelParameters
+ from lib_v5 import spec_utils
+-from lib_v5 import apollo_inference
++#from lib_v5 import apollo_inference
+ from kthread import KThread
+ from pathlib  import Path
+ from separate import (
+     SeperateDemucs, SeperateMDX, SeperateMDXC, SeperateVR,  # Model-related
+     save_format, clear_gpu_cache,  # Utility functions
+-    cuda_available, directml_available, mps_available
++    cuda_available, mps_available
+ )
+ from playsound import playsound
+ from typing import List
+@@ -62,13 +62,11 @@ from os.path import expanduser
+ # import faulthandler
+ # faulthandler.enable()
+ 
+-if not is_macos:
+-    import torch_directml # type:ignore
+ 
+-is_choose_arch = cuda_available and directml_available
+-is_directml_only = not cuda_available and directml_available
+-is_cuda_only = cuda_available and not directml_available
+-is_gpu_available = cuda_available or directml_available or mps_available
++is_choose_arch = cuda_available
++is_directml_only = False
++is_cuda_only = True
++is_gpu_available = cuda_available
+ 
+ # Change the current working directory to the directory
+ # this file sits in
+@@ -383,7 +381,7 @@ class ModelData():
+         self.is_denoise_model = True if root.denoise_option_var.get() == DENOISE_M and os.path.isfile(DENOISER_MODEL_PATH) else False
+         self.is_gpu_conversion = 0 if root.is_gpu_conversion_var.get() else -1
+         self.is_normalization = root.is_normalization_var.get()#
+-        self.is_use_directml = True if is_directml_only else root.is_use_directml_var.get()
++        self.is_use_directml = False
+         self.is_primary_stem_only = root.is_primary_stem_only_var.get()
+         self.is_secondary_stem_only = root.is_secondary_stem_only_var.get()
+         self.is_denoise = True if not root.denoise_option_var.get() == DENOISE_NONE else False
+@@ -3547,18 +3545,12 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
+                 self.cuda_device_list.insert(0, DEFAULT)
+                 print(self.cuda_device_list)
+             
+-            if directml_available:
+-                self.directml_list = [f"{torch_directml.device_name(i)}:{i}" for i in range(torch_directml.device_count())]
+-                self.directml_list.insert(0, DEFAULT)
+         except Exception as e:
+             print(e)
+             
+         if is_cuda_only:
+             self.is_use_directml_var.set(False)
+             
+-        check_gpu_list = self.directml_list if is_directml_only or self.is_use_directml_var.get() else self.cuda_device_list
+-        if not self.device_set_var.get() in check_gpu_list:
+-            self.device_set_var.set(DEFAULT)
+ 
+     def loop_gpu_list(self, option_menu:ComboBoxMenu, menu_name, option_list):
+         option_menu['values'] = option_list
+diff --git a/requirements.txt b/requirements.txt
+index 56802d3..03dde65 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -7,7 +7,7 @@ einops==0.6.0
+ future==0.18.3
+ julius==0.2.7
+ kthread==0.2.3
+-librosa==0.9.2
++librosa==0.10.1
+ llvmlite
+ matchering==2.0.6
+ ml_collections==0.1.1
+@@ -23,30 +23,29 @@ pyrubberband==0.3.0
+ pytorch_lightning==2.0.0
+ PyYAML==6.0
+ resampy==0.4.2
+-scipy==1.9.3
++scipy==1.10.1
+ soundstretch==1.2
+-torch
++torch==2.5.1
++torch_directml
+ urllib3==1.26.12
+ wget==3.2
+ samplerate==0.1.0
+ screeninfo==0.8.1
+ diffq
+-playsound
+ onnx
+ onnxruntime
+ onnxruntime-gpu
+ onnx2pytorch
+-SoundFile==0.11.0; sys_platform != 'darwin'
++SoundFile==0.12.1; sys_platform != 'darwin'
+ PySoundFile==0.9.0.post1; sys_platform == 'darwin'
+-Dora==0.0.3
+-numpy==1.23.5
++numpy==1.24.2
+ segmentation_models_pytorch==0.3.3
+ timm==0.9.2
+-audiomentations==0.24.0
++audiomentations
+ beartype==0.14.1
+ rotary_embedding_torch==0.3.5
+ transformers==4.35.0
+ spafe==0.3.2
+ protobuf==3.20.3
+ torch_audiomentations
+-asteroid==0.7.0
+\ No newline at end of file
++asteroid==0.7.0
+diff --git a/separate.py b/separate.py
+index 6ee4e05..d170872 100644
+--- a/separate.py
++++ b/separate.py
+@@ -41,16 +41,12 @@ import gc
+ if TYPE_CHECKING:
+     from UVR import ModelData
+ 
+-if not is_macos:
+-    import torch_directml # type:ignore
+ 
+ mps_available = torch.backends.mps.is_available() if is_macos else False
+ cuda_available = torch.cuda.is_available()
+ default_sr = 44100
+ 
+ def get_gpu_info():
+-    directml_device, directml_available = DIRECTML_DEVICE, False
+-    
+     if not is_macos:
+         directml_available = torch_directml.is_available()
+ 
+@@ -59,7 +55,6 @@ def get_gpu_info():
+ 
+     return directml_device, directml_available
+ 
+-DIRECTML_DEVICE, directml_available = get_gpu_info()
+ 
+ def clear_gpu_cache():
+     gc.collect()
+@@ -197,11 +192,7 @@ class SeperateAttributes:
+                 if self.device_set != DEFAULT:
+                     device_prefix = DIRECTML_DEVICE if self.is_use_directml and directml_available else CUDA_DEVICE
+ 
+-                if directml_available and self.is_use_directml:
+-                    self.device = torch_directml.device() if not device_prefix else f'{device_prefix}:{self.device_set}'
+-                    self.is_other_gpu = True
+-                    self.is_using_directml = True
+-                elif cuda_available and not self.is_use_directml:
++                if cuda_available:
+                     self.device = CUDA_DEVICE if not device_prefix else f'{device_prefix}:{self.device_set}'
+                     self.run_type = ['CUDAExecutionProvider']
+ 
+@@ -817,7 +808,7 @@ class SeperateMDXC(SeperateAttributes):
+ 
+         batch_len = int(mix.shape[1] / step)
+ 
+-        with torch.no_grad() if self.is_using_directml else torch.inference_mode():
++        with torch.no_grad() if False else torch.inference_mode():
+             req_shape = (S, ) + tuple(mix.shape)
+             result = torch.zeros(req_shape, dtype=torch.float32, device=device)
+             counter = torch.zeros(req_shape, dtype=torch.float32, device=device)
